@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Снежный вокзал — Новелла-Сон</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background-color: #050811;
+      color: #e2e8f0;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+    }
+    /* ФОН */
+    #bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: url('poezd.jpg') center/cover no-repeat;
+      filter: brightness(0.8) contrast(1.1);
+      transition: filter 0.5s ease;
+    }
+    /* СПРАЙТ ПЕРСОНАЖА */
+    #character-container {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 90vh;
+      z-index: 2;
+      pointer-events: none;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      transition: opacity 0.5s ease;
+    }
+    #character-sprite {
+      max-height: 100%;
+      max-width: 90vw;
+      object-fit: contain;
+      filter: drop-shadow(0 0 20px rgba(0,0,0,0.85));
+      transition: opacity 0.4s ease, transform 0.3s ease;
+    }
+    /* ДИАЛОГОВОЕ ОКНО */
+    #ui-container {
+      position: absolute;
+      bottom: 25px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90%;
+      max-width: 950px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #dialogue-box {
+      background: rgba(15, 23, 42, 0.94);
+      border: 2px solid #64748b;
+      border-radius: 8px;
+      padding: 22px 28px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85);
+      cursor: pointer;
+      min-height: 140px;
+    }
+    #speaker-name {
+      font-size: 1.3rem;
+      font-weight: bold;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    #dialogue-text {
+      font-size: 1.15rem;
+      line-height: 1.6;
+      color: #f1f5f9;
+    }
+    /* ВЫБОРЫ */
+    #choices-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 11;
+    }
+    .choice-btn {
+      background: rgba(30, 41, 59, 0.96);
+      border: 1px solid #64748b;
+      color: #f8fafc;
+      padding: 14px 20px;
+      border-radius: 6px;
+      font-size: 1.05rem;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .choice-btn:hover {
+      background: rgba(51, 65, 85, 0.96);
+      border-color: #cbd5e1;
+      padding-left: 25px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <div id="bg"></div>
+    
+    <div id="character-container" style="display: none;">
+      <img id="character-sprite" src="kevin.png" alt="Мистер Кристи">
+    </div>
+
+    <div id="ui-container">
+      <div id="choices-container" style="display: none;"></div>
+      <div id="dialogue-box">
+        <div id="speaker-name"></div>
+        <div id="dialogue-text"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let playerName = "незнакомка";
+    let audioCtx = null;
+
+    // Инициализация звуков через Web Audio API
+    function initAudio() {
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Фоновый шум ветра
+      const bufferSize = audioCtx.sampleRate * 2;
+      const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = Math.random() * 2 - 1;
+      }
+
+      const whiteNoise = audioCtx.createBufferSource();
+      whiteNoise.buffer = noiseBuffer;
+      whiteNoise.loop = true;
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(320, audioCtx.currentTime);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+
+      whiteNoise.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      whiteNoise.start();
+    }
+
+    // Звук клика
+    function playClickSound() {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.04);
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.04);
+    }
+
+    // Гудок поезда
+    function playTrainWhistle() {
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const osc1 = audioCtx.createOscillator();
+      const osc2 = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc1.type = 'sawtooth';
+      osc2.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(270, now);
+      osc2.frequency.setValueAtTime(274, now);
+      
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(650, now);
+      filter.Q.setValueAtTime(4, now);
+
+      gain.gain.setValueAtTime(0.0, now);
+      gain.gain.linearRampToValueAtTime(0.14, now + 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 3.8);
+
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 3.8);
+      osc2.stop(now + 3.8);
+    }
+
+    const story = [
+      {
+        speaker: "",
+        text: "Ледяной ветер тихими порывами гоняет снежную крупу по заброшенному вокзалу. Холод ощущается странно... он не жжёт кожу, а будто проникает в саму суть сознания.",
+        sprite: null
+      },
+      {
+        speaker: "",
+        text: "В воздухе пахнет старой бумагой, пеплом и давней тоской. Вы понимаете, что это лишь сон, но его границы ощущаются пугающе реальными.",
+        sprite: null
+      },
+      {
+        speaker: "",
+        text: "На краю платформы одиноко стоит человек в элегантном пальто и шляпе, задумчиво глядя на пустые заснеженные рельсы.",
+        sprite: null
+      },
+      {
+        speaker: "Незнакомец",
+        text: "Вы тоже ждёте свой рейс?",
+        sprite: "kevin.png",
+        choices: [
+          { text: "Да, жду", nextIndex: 4 },
+          { text: "Где я?", nextIndex: 5 }
+        ]
+      },
+      // Ответ "Да, жду"
+      {
+        speaker: "Незнакомец",
+        text: "Тогда присаживайтесь. Вдвоём ожидать куда веселее. Хотя путь предстоит долгий...",
+        sprite: "kevin.png",
+        nextIndex: 6
+      },
+      // Ответ "Где я?"
+      {
+        speaker: "Незнакомец",
+        text: "Мы на вокзале, откуда поезда уходят лишь в один конец... Я всё никак не могу дождаться своего. Садитесь рядом, подождём вместе.",
+        sprite: "kevin.png",
+        nextIndex: 6
+      },
+      // Вопрос об имени
+      {
+        speaker: "Незнакомец",
+        text: "Кстати, как вас зовут, юная леди?",
+        sprite: "kevin.png",
+        choices: [
+          { 
+            text: "Меня зовут Спарки", 
+            action: () => { playerName = "Спарки"; },
+            replySpeaker: "Мистер Кристи",
+            replyText: "Приятно познакомиться, Спарки. А меня можете звать Мистер Кристи — это имя когда-то придумала моя сестра, хотя сам я уже почти ничего не помню из той жизни...",
+            nextIndex: 7
+          },
+          { 
+            text: "Я крошка Сюзи", 
+            action: () => { playerName = "крошка Сюзи"; },
+            replySpeaker: "Мистер Кристи",
+            replyText: "Приятно познакомиться. А меня зовут Мистер Кристи — это имя придумала сестра... забавно, как мелкие детали остаются с нами, когда всё остальное исчезает.",
+            nextIndex: 7
+          },
+          { 
+            text: "... (Промолчать)", 
+            action: () => { playerName = "незнакомка"; },
+            replySpeaker: "Незнакомец",
+            replyText: "...Как-то неловко получилось, да? Ну да ладно. Можете зовите меня Мистером Кристи, если захотите.",
+            nextIndex: 7
+          }
+        ]
+      },
+      // Новая ветка о писательском ремесле
+      {
+        speaker: "Мистер Кристи",
+        text: "Знаете, когда-то я верил, что сказки могут защитить от любого зла. Стоит только записать их на красивой бумаге...",
+        sprite: "kevin.png"
+      },
+      {
+        speaker: "Мистер Кристи",
+        text: "Как думаете, юная леди, зачем люди вообще пишут сказки?",
+        sprite: "kevin.png",
+        choices: [
+          {
+            text: "Чтобы подарить надежду тем, кто потерян",
+            replySpeaker: "Мистер Кристи",
+            replyText: "Надежду... Красивые слова. Но что, если надежда наталкивается на чью-то жестокую волю?",
+            nextIndex: 9
+          },
+          {
+            text: "Чтобы сбежать от суровой реальности",
+            replySpeaker: "Мистер Кристи",
+            replyText: "Иногда побег — это единственное, что нам остаётся. Жаль только, реальность всегда догоняет...",
+            nextIndex: 9
+          }
+        ]
+      },
+      // Размышления о финалах
+      {
+        speaker: "Мистер Кристи",
+        text: "Госпожа, вам не кажется, что некоторые истории достойны нескольких финалов?",
+        sprite: "kevin.png"
+      },
+      {
+        speaker: "Мистер Кристи",
+        text: "Я имею в виду... Какой бы финал ей ни сделаешь, всегда останутся недовольные им. И это меня огорчает. А еще страшнее, когда у истории вообще вырывают финал...",
+        sprite: "kevin.png",
+        choices: [
+          {
+            text: "Да, финалов должно быть больше",
+            replySpeaker: "Мистер Кристи",
+            replyText: "Вот и я о том же... Возможность выбора — это редкое милосердие.",
+            nextIndex: 11
+          },
+          {
+            text: "Нет, финал всегда один",
+            replySpeaker: "Мистер Кристи",
+            replyText: "Строго, но в этом есть своя точка. Главное, чтобы эта точка не была поставлена чьим-то клинком.",
+            nextIndex: 11
+          }
+        ]
+      },
+      // Загадочные намеки
+      {
+        speaker: "Мистер Кристи",
+        text: "Мои собственные истории... они разлетелись. Знаете, как вырванные из книги страницы на сильном ветру. И боюсь, за время моего отсутствия они сильно изменились.",
+        sprite: "kevin.png"
+      },
+      {
+        speaker: "Мистер Кристи",
+        text: "Гнев, обида, боль... они умеют переписывать слова. Сказки становятся монстрами, когда их автора больше нет рядом, чтобы их успокоить.",
+        sprite: "kevin.png"
+      },
+      {
+        speaker: "Мистер Кристи",
+        text: () => `У тебя интересное мнение об историях, юная леди. Жаль, мы не встретились в прошлом — там, где еще шумели зелёные леса, а не ледяная пустошь.`,
+        sprite: "kevin.png"
+      },
+      // Прощание и сплит спрайта
+      {
+        speaker: "Мистер Кристи",
+        text: () => `Кажется, это твой поезд, ${playerName}. Спасибо за беседу! Я, вообще, своего рода писатель... И если в своем путешествии найдешь мои книжки — не относись к ним строго. Я дорожил тем, что написал.`,
+        sprite: "kevin.png",
+        choices: [
+          {
+            text: "Мы встретимся снова?",
+            replySpeaker: "Мистер Кристи",
+            replySprite: "kevin.png",
+            replyText: "Кто знает?... Память — штука туманная. Возможно, в следующей сказке.",
+            nextIndex: 15
+          },
+          {
+            text: "Хорошо, бротанчик, я даже читать твою писанину не буду!",
+            replySpeaker: "Мистер Кристи",
+            replySprite: "kevin.png",
+            replyText: "*тихо усмехается* Что ж... тоже честная позиция. Возможно, так для тебя будет даже безопаснее.",
+            nextIndex: 15
+          },
+          {
+            text: "Я прочту и вывалю тебе экспертное мнение, когда встретимся!",
+            replySpeaker: "Мистер Кристи",
+            replySprite: "kevin_happy.png", // ТОЛЬКО ЗДЕСЬ УЛЫБАЮЩИЙСЯ СПРАЙТ!
+            replyText: "Договорились. Я буду ждать. С нетерпением буду ждать твоего рецензирования.",
+            nextIndex: 15
+          }
+        ]
+      },
+      // Завершение
+      {
+        speaker: "",
+        text: "В густом паре раздаётся тяжелый, глухой гудок поезда. Железные двери вагона со скрипом отворяются, обдавая перрон клубами мороза.",
+        sprite: null,
+        onShow: () => playTrainWhistle()
+      },
+      {
+        speaker: "",
+        text: "Вы ступаете внутрь, а за спиной постепенно растворяется заснеженный перрон и одинокая фигура Кристи, сжимающего в руках невидимый переплёт...",
+        sprite: null
+      }
+    ];
+
+    let currentIndex = 0;
+    const speakerEl = document.getElementById('speaker-name');
+    const textEl = document.getElementById('dialogue-text');
+    const spriteEl = document.getElementById('character-sprite');
+    const spriteContainer = document.getElementById('character-container');
+    const choicesEl = document.getElementById('choices-container');
+    const dialogueBox = document.getElementById('dialogue-box');
+
+    function renderStep() {
+      choicesEl.style.display = 'none';
+      choicesEl.innerHTML = '';
+
+      if (currentIndex >= story.length) {
+        speakerEl.innerText = "";
+        textEl.innerText = "Сон растворяется... Вы пробуждаетесь.";
+        spriteContainer.style.display = 'none';
+        return;
+      }
+
+      const step = story[currentIndex];
+
+      // Спрайт
+      if (step.sprite) {
+        spriteEl.src = step.sprite;
+        spriteContainer.style.display = 'flex';
+      } else {
+        spriteContainer.style.display = 'none';
+      }
+
+      // Текст и говорящий
+      speakerEl.innerText = step.speaker || "";
+      textEl.innerText = typeof step.text === 'function' ? step.text() : step.text;
+
+      // Триггеры событий
+      if (step.onShow) step.onShow();
+
+      // Отрисовка вариантов выбора
+      if (step.choices) {
+        step.choices.forEach(c => {
+          const btn = document.createElement('button');
+          btn.className = 'choice-btn';
+          btn.innerText = c.text;
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            initAudio();
+            playClickSound();
+            if (c.action) c.action();
+            
+            if (c.replyText) {
+              speakerEl.innerText = c.replySpeaker || "";
+              textEl.innerText = c.replyText;
+              
+              // Меняем спрайт на ответ, если он передан (например, kevin_happy.png)
+              if (c.replySprite) {
+                spriteEl.src = c.replySprite;
+                spriteContainer.style.display = 'flex';
+              }
+              
+              choicesEl.style.display = 'none';
+              currentIndex = c.nextIndex;
+            } else {
+              currentIndex = c.nextIndex;
+              renderStep();
+            }
+          };
+          choicesEl.appendChild(btn);
+        });
+        choicesEl.style.display = 'flex';
+      }
+    }
+
+    dialogueBox.onclick = () => {
+      initAudio();
+      playClickSound();
+      if (choicesEl.style.display === 'flex') return;
+      const step = story[currentIndex];
+      if (step && step.nextIndex !== undefined) {
+        currentIndex = step.nextIndex;
+      } else {
+        currentIndex++;
+      }
+      renderStep();
+    };
+
+    renderStep();
+  </script>
+</body>
+</html>
